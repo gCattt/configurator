@@ -36,8 +36,12 @@ impl DataPath {
     }
 
     pub fn open(&mut self, field: DataPathType) {
-        if let Some(pos) = self.pos
-            && let Some(current) = self.get_at(pos + 1)
+        let next_pos = match self.pos {
+            Some(pos) => pos + 1,
+            None => 0,
+        };
+
+        if let Some(current) = self.get_at(next_pos)
             && current == &field
         {
             // we want the negation
@@ -47,10 +51,7 @@ impl DataPath {
             self.vec.push(field);
         }
 
-        match &mut self.pos {
-            Some(pos) => *pos += 1,
-            None => self.pos = Some(0),
-        }
+        self.pos.replace(next_pos);
     }
 
     pub fn change_to(&mut self, pos: Option<usize>) {
@@ -65,10 +66,10 @@ impl DataPath {
         self.pos.map(|pos| self.get_at(pos).unwrap())
     }
 
-    pub fn current(&self) -> std::slice::Iter<'_, DataPathType> {
+    pub fn current(&self) -> &[DataPathType] {
         match self.pos {
-            Some(pos) => self.vec[0..=pos].iter(),
-            None => [].iter(),
+            Some(pos) => &self.vec[0..=pos],
+            None => &[],
         }
     }
 }

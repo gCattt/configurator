@@ -8,7 +8,7 @@ use figment_schemars_bridge::json_value_to_figment_value;
 
 use crate::node::Node;
 
-use super::NodeContainer;
+use super::{NodeContainer, NumberValue};
 
 impl Provider for NodeContainer {
     fn metadata(&self) -> figment::Metadata {
@@ -42,9 +42,10 @@ impl NodeContainer {
                 .value
                 .as_ref()
                 .map(|value| Value::String(*tag, value.clone())),
-            Node::Number(node_number) => node_number
-                .value
-                .map(|value| Value::Num(*tag, Num::I128(value))),
+            Node::Number(node_number) => node_number.value.as_ref().map(|value| match value {
+                NumberValue::I128(value) => Value::Num(*tag, Num::I128(*value)),
+                NumberValue::F64(value) => Value::Num(*tag, Num::F64(*value)),
+            }),
             Node::Object(node_object) => {
                 let mut dict = Dict::new();
 
