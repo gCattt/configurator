@@ -1,0 +1,4 @@
+
+[env]
+# RUST_LOG = "warn,fan_control=info,ui=info,data=info,hardware=info"
+RUST_BACKTRACE = "1"
