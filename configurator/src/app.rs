@@ -20,126 +20,27 @@ use figment::{
 use figment_schemars_bridge::JsonSchemaProvider;
 use json::Value;
 use schemars::schema::RootSchema;
+use xdg::BaseDirectories;
+use zconf2::ConfigManager;
 
 use crate::{
     config::{Config, CONFIG_PATH, SCHEMAS_PATH},
     fl,
     message::{AppMsg, ChangeMsg, PageMsg},
     node::{data_path::DataPath, Node, NodeContainer, NumberKind, NumberValue},
+    page::{create_pages, Page},
     view::view_app,
 };
 
+pub const QUALIFIER: &str = "io.github";
+pub const ORG: &str = "wiiznokes";
+pub const APP: &str = "configurator";
 pub const APPID: &str = "io.github.wiiznokes.configurator";
 
 pub struct App {
     core: Core,
     pub nav_model: SingleSelectModel,
-    pub config: Config,
-}
-
-#[derive(Debug)]
-pub struct Page {
-    pub title: String,
-    pub system_config_path: Option<PathBuf>,
-    pub user_config_path: PathBuf,
-    pub schema: RootSchema,
-    /// Maybe located in `/usr`
-    pub system_config: Figment,
-    /// User config located in `~/.config`
-    pub user_config: Figment,
-    /// Actual configuration
-    pub full_config: Figment,
-    pub tree: NodeContainer,
-    pub data_path: DataPath,
-}
-
-struct BoxedProvider(Box<dyn Provider>);
-
-impl Provider for BoxedProvider {
-    fn metadata(&self) -> figment::Metadata {
-        self.0.metadata()
-    }
-
-    fn data(
-        &self,
-    ) -> Result<figment::value::Map<figment::Profile, figment::value::Dict>, figment::Error> {
-        self.0.data()
-    }
-}
-
-fn provider_from_path(path: &Path) -> anyhow::Result<BoxedProvider> {
-    let provider = if let Some(extension) = path.extension() {
-        if let Some(extension) = extension.to_str() {
-            match extension {
-                "json" => providers::Json::file(path),
-                _ => {
-                    bail!("no match for {}", extension);
-                }
-            }
-        } else {
-            bail!("can't convert extension to str")
-        }
-    } else {
-        bail!("no extension")
-    };
-    Ok(BoxedProvider(Box::new(provider)))
-}
-
-impl Page {
-    fn new(path: &Path) -> anyhow::Result<Self> {
-        let title = path.file_name().unwrap().to_string_lossy().to_string();
-
-        let mut file = File::open(path).unwrap();
-        let mut contents = String::new();
-        file.read_to_string(&mut contents).unwrap();
-
-        let value = json::value::Value::from_str(&contents).unwrap();
-
-        let Some(obj) = value.as_object() else {
-            bail!("no obj")
-        };
-
-        let Some(Value::String(user_config_path)) = obj.get("X_CONFIG_PATH").cloned() else {
-            bail!("X_CONFIG_PATH not defined")
-        };
-
-        let json_schema: RootSchema = json::from_value(value)?;
-
-        // todo
-        let system_config = Figment::new();
-
-        let user_config = Figment::new().merge(provider_from_path(Path::new(&user_config_path))?);
-
-        let full_config = Figment::new()
-            .merge(system_config.clone())
-            .merge(user_config.clone());
-
-        let mut tree = NodeContainer::from_json_schema(&json_schema);
-
-        dbg!(&tree);
-
-        tree.apply_figment(&full_config).unwrap();
-
-        assert!(tree.is_valid());
-
-        // dbg!(&tree);
-
-        Ok(Self {
-            title,
-            schema: json_schema,
-            system_config_path: None,
-            user_config_path: user_config_path.into(),
-            user_config,
-            system_config,
-            full_config,
-            tree,
-            data_path: DataPath::new(),
-        })
-    }
-
-    fn title(&self) -> String {
-        self.title.clone()
-    }
+    pub config: ConfigManager<Config>,
 }
 
 impl cosmic::Application for App {
@@ -158,31 +59,15 @@ impl cosmic::Application for App {
     }
 
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
-        crate::config::gen_schema();
-
         let mut nav_model = SingleSelectModel::default();
 
-        for (i, entry) in fs::read_dir(SCHEMAS_PATH).unwrap().enumerate() {
-            let entry = entry.unwrap();
-
-            let page = Page::new(&entry.path()).unwrap();
-
-            // dbg!(&page);
-
-            let id = nav_model
-                .insert()
-                .text(page.title())
-                .data::<Page>(page)
-                .id();
-
-            if i == 0 {
-                nav_model.activate(id);
-            }
+        for page in create_pages() {
+            nav_model.insert().text(page.title()).data::<Page>(page);
         }
 
-        // let config = Config::default();
+        nav_model.activate_position(0);
 
-        let config = zconf::init(APPID, PathBuf::from(CONFIG_PATH));
+        let config = ConfigManager::new(QUALIFIER, ORG, APP).unwrap();
 
         let app = App {
             core,
@@ -190,9 +75,7 @@ impl cosmic::Application for App {
             config,
         };
 
-        // let cmd = cosmic::app::command::message::cosmic(cosmic::app::cosmic::Message::Close);
-        let cmd = Task::none();
-        (app, cmd)
+        (app, Task::none())
     }
 
     fn nav_model(&self) -> Option<&widget::nav_bar::Model> {
@@ -210,13 +93,6 @@ impl cosmic::Application for App {
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         match message {
-            AppMsg::ConfigActive(value) => {
-                self.config.set_active(value);
-            }
-            AppMsg::ReloadLocalConfig => {
-                let config = zconf::zconf_derive_impl::load();
-                self.config = config;
-            }
             AppMsg::PageMsg(id, page_msg) => {
                 if let Some(page) = self.nav_model.data_mut::<Page>(id) {
                     match page_msg {
@@ -238,10 +114,12 @@ impl cosmic::Application for App {
                                 ChangeMsg::ChangeBool(value) => {
                                     let node_bool = node.node.unwrap_bool_mut();
                                     node_bool.value = Some(value);
+                                    page.tree.set_modified(data_path.iter());
                                 }
                                 ChangeMsg::ChangeString(value) => {
                                     let node_string = node.node.unwrap_string_mut();
                                     node_string.value = Some(value);
+                                    page.tree.set_modified(data_path.iter());
                                 }
                                 ChangeMsg::ChangeNumber(value) => {
                                     let node_number = node.node.unwrap_number_mut();
@@ -259,18 +137,35 @@ impl cosmic::Application for App {
                                         }
                                     }
                                     node_number.value_string = value;
+                                    page.tree.set_modified(data_path.iter());
                                 }
                                 ChangeMsg::ChangeEnum(value) => {
                                     let node_enum = node.node.unwrap_enum_mut();
                                     node_enum.value = Some(value);
+                                    page.tree.set_modified(data_path.iter());
                                 }
                             }
+
+                            page.write().unwrap();
                         }
                         PageMsg::None => {
                             // pass
                         }
                     }
                 }
+            }
+            AppMsg::ReloadActivePage => {
+                if let Some(page) = self.nav_model.active_data_mut::<Page>() {
+                    page.reload().unwrap();
+                }
+            }
+            AppMsg::ReloadLocalConfig => {
+                self.config.reload().unwrap();
+            }
+            AppMsg::ConfigActive(value) => {
+                self.config.update(|settings| {
+                    settings.active = value;
+                });
             }
         };
 
@@ -291,5 +186,11 @@ impl cosmic::Application for App {
             //     .on_press(AppMsg::ReloadLocalConfig)
             //     .into(),
         ]
+    }
+
+    fn header_end(&self) -> Vec<Element<Self::Message>> {
+        vec![button::text("reload")
+            .on_press(AppMsg::ReloadActivePage)
+            .into()]
     }
 }

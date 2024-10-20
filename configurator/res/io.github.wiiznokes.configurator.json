@@ -148,5 +148,5 @@
       }
     }
   },
-  "X_CONFIG_PATH": "configurator/config/io.github.wiiznokes.configurator.json"
+  "X_CONFIGURATOR_SOURCE_HOME_PATH": ".config/configurator/configurator.json"
 }
