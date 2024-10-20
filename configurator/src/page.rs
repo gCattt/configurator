@@ -18,7 +18,8 @@ use xdg::BaseDirectories;
 
 use crate::{
     figment_serde_bridge::FigmentSerdeBridge,
-    node::{data_path::DataPath, NodeContainer},
+    message::{ChangeMsg, PageMsg},
+    node::{data_path::DataPath, NodeContainer, NumberKind, NumberValue},
 };
 
 struct BoxedProvider(Box<dyn Provider>);
@@ -63,6 +64,7 @@ impl ConfigFormat {
 
 #[derive(Debug)]
 pub struct Page {
+    pub appid: String,
     pub title: String,
 
     pub source_paths: Vec<PathBuf>,
@@ -170,15 +172,15 @@ impl Page {
 
         let tree = NodeContainer::from_json_schema(&json::from_value(json_value)?);
 
-        let appid = path.file_name().unwrap().to_string_lossy();
+        let schema_name = path.file_name().unwrap().to_string_lossy();
 
-        let title = match appid.split('.').rev().nth(1) {
-            Some(app_name) => app_name.to_string(),
-            None => appid.to_string(),
-        };
+        let appid = schema_name.strip_suffix(".json").unwrap().to_string();
+
+        let title = appid.split('.').last().unwrap().to_string();
 
         let mut page = Self {
             title,
+            appid,
             system_config,
             user_config: Figment::new(),
             full_config: Figment::new(),
@@ -219,7 +221,7 @@ impl Page {
 
         let data = Figment::new().merge(&self.tree);
 
-        dbg!(&data);
+        // dbg!(&data);
 
         let serde_bridge = FigmentSerdeBridge::new(&data);
 
@@ -246,5 +248,76 @@ impl Page {
         }
 
         Ok(())
+    }
+
+    pub fn update(&mut self, message: PageMsg) {
+        match message {
+            PageMsg::SelectDataPath(pos) => {
+                self.data_path.change_to(pos);
+            }
+            PageMsg::OpenDataPath(data_path_type) => {
+                self.data_path.open(data_path_type);
+            }
+            PageMsg::ChangeMsg(data_path, change_msg) => {
+                let node = self.tree.get_at_mut(data_path.iter()).unwrap();
+
+                match change_msg {
+                    ChangeMsg::ApplyDefault => {
+                        node.remove_value_rec();
+                        node.apply_value(node.default.clone().unwrap(), false)
+                            .unwrap();
+
+                        self.tree
+                            .set_modified(data_path[..data_path.len() - 1].iter());
+                    }
+                    ChangeMsg::ChangeBool(value) => {
+                        let node_bool = node.node.unwrap_bool_mut();
+                        node_bool.value = Some(value);
+                        self.tree.set_modified(data_path.iter());
+                    }
+                    ChangeMsg::ChangeString(value) => {
+                        let node_string = node.node.unwrap_string_mut();
+                        node_string.value = Some(value);
+                        self.tree.set_modified(data_path.iter());
+                    }
+                    ChangeMsg::ChangeNumber(value) => {
+                        let node_number = node.node.unwrap_number_mut();
+                        node_number.value_string = value;
+
+                        match node_number.kind {
+                            NumberKind::Integer => {
+                                if let Ok(value) = node_number.value_string.parse() {
+                                    node_number.value = Some(NumberValue::I128(value));
+                                } else {
+                                    return;
+                                }
+                            }
+                            NumberKind::Float => {
+                                if let Ok(value) = node_number.value_string.parse() {
+                                    node_number.value = Some(NumberValue::F64(value));
+                                } else {
+                                    return;
+                                }
+                            }
+                        }
+                        self.tree.set_modified(data_path.iter());
+                    }
+                    ChangeMsg::ChangeEnum(value) => {
+                        let node_enum = node.node.unwrap_enum_mut();
+                        node_enum.value = Some(value);
+
+                        node_enum.nodes[value].modified = true;
+                        self.tree.set_modified(data_path.iter());
+                    }
+                }
+
+                if self.tree.is_valid() {
+                    self.write().unwrap();
+                }
+            }
+            PageMsg::None => {
+                // pass
+            }
+        }
     }
 }

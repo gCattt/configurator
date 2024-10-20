@@ -41,15 +41,31 @@ impl cosmic::Application for App {
     }
 
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
+        let config: ConfigManager<Config> = ConfigManager::new(QUALIFIER, ORG, APP).unwrap();
+
         let mut nav_model = SingleSelectModel::default();
 
+        let mut active = false;
+
         for page in create_pages() {
-            nav_model.insert().text(page.title()).data::<Page>(page);
+            if let Some(appid) = &config.settings().last_used_page
+                && appid == &page.appid
+            {
+                let entity = nav_model
+                    .insert()
+                    .text(page.title())
+                    .data::<Page>(page)
+                    .id();
+                nav_model.activate(entity);
+                active = true;
+            } else {
+                nav_model.insert().text(page.title()).data::<Page>(page);
+            }
         }
 
-        nav_model.activate_position(0);
-
-        let config = ConfigManager::new(QUALIFIER, ORG, APP).unwrap();
+        if !active {
+            nav_model.activate_position(0);
+        }
 
         let app = App {
             core,
@@ -66,6 +82,12 @@ impl cosmic::Application for App {
 
     fn on_nav_select(&mut self, id: widget::nav_bar::Id) -> Task<Self::Message> {
         self.nav_model.activate(id);
+
+        let page: &Page = self.nav_model.data(self.nav_model.active()).unwrap();
+
+        self.config.update(|s| {
+            s.last_used_page = Some(page.appid.clone());
+        });
         Task::none()
     }
 
@@ -77,63 +99,7 @@ impl cosmic::Application for App {
         match message {
             AppMsg::PageMsg(id, page_msg) => {
                 if let Some(page) = self.nav_model.data_mut::<Page>(id) {
-                    match page_msg {
-                        PageMsg::SelectDataPath(pos) => {
-                            page.data_path.change_to(pos);
-                        }
-                        PageMsg::OpenDataPath(data_path_type) => {
-                            page.data_path.open(data_path_type);
-                        }
-                        PageMsg::ChangeMsg(data_path, change_msg) => {
-                            let node = page.tree.get_at_mut(data_path.iter()).unwrap();
-
-                            match change_msg {
-                                ChangeMsg::ApplyDefault => {
-                                    node.remove_value_rec();
-                                    node.apply_value(node.default.clone().unwrap(), false)
-                                        .unwrap();
-                                }
-                                ChangeMsg::ChangeBool(value) => {
-                                    let node_bool = node.node.unwrap_bool_mut();
-                                    node_bool.value = Some(value);
-                                    page.tree.set_modified(data_path.iter());
-                                }
-                                ChangeMsg::ChangeString(value) => {
-                                    let node_string = node.node.unwrap_string_mut();
-                                    node_string.value = Some(value);
-                                    page.tree.set_modified(data_path.iter());
-                                }
-                                ChangeMsg::ChangeNumber(value) => {
-                                    let node_number = node.node.unwrap_number_mut();
-
-                                    match node_number.kind {
-                                        NumberKind::Integer => {
-                                            if let Ok(value) = value.parse() {
-                                                node_number.value = Some(NumberValue::I128(value));
-                                            }
-                                        }
-                                        NumberKind::Float => {
-                                            if let Ok(value) = value.parse() {
-                                                node_number.value = Some(NumberValue::F64(value));
-                                            }
-                                        }
-                                    }
-                                    node_number.value_string = value;
-                                    page.tree.set_modified(data_path.iter());
-                                }
-                                ChangeMsg::ChangeEnum(value) => {
-                                    let node_enum = node.node.unwrap_enum_mut();
-                                    node_enum.value = Some(value);
-                                    page.tree.set_modified(data_path.iter());
-                                }
-                            }
-
-                            page.write().unwrap();
-                        }
-                        PageMsg::None => {
-                            // pass
-                        }
-                    }
+                    page.update(page_msg);
                 }
             }
             AppMsg::ReloadActivePage => {
