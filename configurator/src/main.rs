@@ -11,18 +11,19 @@ extern crate tracing;
 
 mod app;
 mod config;
+mod figment_serde_bridge;
 mod localize;
 mod message;
 mod node;
 mod page;
 mod utils;
 mod view;
-
 #[macro_use]
 mod icon;
-
 #[cfg(test)]
 mod json_schema_test_suite;
+#[cfg(test)]
+mod testing1;
 
 fn setup_logs() {
     use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
