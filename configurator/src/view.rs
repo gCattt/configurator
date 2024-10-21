@@ -362,6 +362,7 @@ fn view_enum<'a>(
                                         None
                                     }
                                 }))
+                                .align_y(Alignment::Center)
                         },
                         pos,
                         node_enum.value,

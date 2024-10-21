@@ -445,8 +445,8 @@ impl Page {
             }
             PageMsg::DialogRenameKey(data_path, key) => {
                 return Action::CreateDialog(Dialog::RenameKey {
-                    previous: key,
-                    name: String::new(),
+                    previous: key.clone(),
+                    name: key,
                     data_path,
                     page_id,
                 });

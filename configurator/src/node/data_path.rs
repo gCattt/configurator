@@ -75,10 +75,7 @@ impl DataPath {
 
     /// Keep the maximum of path, based on node that still exist
     pub fn sanitize_path(&mut self, tree: &NodeContainer) {
-        dbg!(&self);
-
         if let Some(pos) = sanitize_path_rec(self.vec.iter(), tree, 0) {
-            dbg!(&pos);
             self.vec.truncate(pos);
 
             if pos == 0 {
@@ -89,7 +86,6 @@ impl DataPath {
                     .map(|current_pos| std::cmp::min(current_pos, pos - 1));
             }
         }
-        dbg!(&self);
     }
 }
 
