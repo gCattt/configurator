@@ -5,6 +5,7 @@ use figment::{
     value::{Tag, Value},
     Figment,
 };
+use indexmap::map::MutableKeys;
 
 use crate::utils::{data_default_profile_figment, json_value_eq_figment_value};
 
@@ -69,6 +70,9 @@ impl NodeContainer {
                 node_enum.value = Some(pos);
             }
             (Value::Dict(tag, mut values), Node::Object(node_object)) => {
+                // hashmap are overided by existence of a value
+                node_object.nodes.retain(|_, node| !node.removable);
+
                 // for known object field ?
                 for (key, n) in &mut node_object.nodes {
                     if let Some(value) = values.remove(key) {
@@ -79,11 +83,11 @@ impl NodeContainer {
                 }
 
                 // for hashmap ?
-                if let Some(node_type) = &node_object.node_type {
+                if let Some(template) = node_object.template() {
                     for (key, value) in values {
-                        let mut node_type = (*node_type).clone();
+                        let mut node_type = template.clone();
                         node_type.apply_value(value, modified)?;
-                        node_object.nodes.insert(key, *node_type);
+                        node_object.nodes.insert(key, node_type);
                     }
                 }
             }
@@ -107,7 +111,7 @@ impl NodeContainer {
                 let mut nodes = Vec::new();
 
                 for value in values {
-                    let mut new_node = (*node_array.node_type).clone();
+                    let mut new_node = node_array.template();
                     new_node.apply_value(value, modified)?;
                     nodes.push(new_node);
                 }

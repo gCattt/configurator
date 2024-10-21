@@ -7,19 +7,21 @@ use std::{
 };
 
 use anyhow::{anyhow, bail};
+use cosmic::widget::segmented_button::Entity;
 use directories::BaseDirs;
 use figment::{
     providers::{self, Format},
+    value::{Dict, Tag, Value},
     Figment, Provider,
 };
 
-use json::Value;
 use xdg::BaseDirectories;
 
 use crate::{
+    app::Dialog,
     figment_serde_bridge::FigmentSerdeBridge,
     message::{ChangeMsg, PageMsg},
-    node::{data_path::DataPath, NodeContainer, NumberKind, NumberValue},
+    node::{data_path::DataPath, Node, NodeContainer, NumberKind, NumberValue},
 };
 
 struct BoxedProvider(Box<dyn Provider>);
@@ -117,7 +119,7 @@ impl Page {
             let mut contents = String::new();
             file.read_to_string(&mut contents).unwrap();
 
-            json::value::Value::from_str(&contents).unwrap()
+            json::Value::from_str(&contents).unwrap()
         };
 
         let Some(json_obj) = json_value.as_object() else {
@@ -125,7 +127,7 @@ impl Page {
         };
 
         let source_paths = {
-            if let Some(Value::String(paths)) = json_obj.get("X_CONFIGURATOR_SOURCE_PATHS") {
+            if let Some(json::Value::String(paths)) = json_obj.get("X_CONFIGURATOR_SOURCE_PATHS") {
                 paths.split_terminator(';').map(PathBuf::from).collect()
             } else {
                 vec![]
@@ -133,7 +135,8 @@ impl Page {
         };
 
         let source_home_path = {
-            if let Some(Value::String(path)) = json_obj.get("X_CONFIGURATOR_SOURCE_HOME_PATH") {
+            if let Some(json::Value::String(path)) = json_obj.get("X_CONFIGURATOR_SOURCE_HOME_PATH")
+            {
                 let base_dirs = BaseDirs::new().unwrap();
 
                 base_dirs.home_dir().join(path)
@@ -143,7 +146,7 @@ impl Page {
         };
 
         let write_path = {
-            if let Some(Value::String(path)) = json_obj.get("X_CONFIGURATOR_WRITE_PATH") {
+            if let Some(json::Value::String(path)) = json_obj.get("X_CONFIGURATOR_WRITE_PATH") {
                 PathBuf::from(path)
             } else {
                 source_home_path.clone()
@@ -151,7 +154,7 @@ impl Page {
         };
 
         let format = {
-            if let Some(Value::String(format)) = json_obj.get("X_CONFIGURATOR_FORMAT") {
+            if let Some(json::Value::String(format)) = json_obj.get("X_CONFIGURATOR_FORMAT") {
                 format
             } else {
                 source_home_path
@@ -194,6 +197,8 @@ impl Page {
 
         page.reload().unwrap();
 
+        // dbg!(&page.tree);
+
         Ok(page)
     }
 
@@ -211,13 +216,19 @@ impl Page {
 
         self.tree.apply_figment(&self.full_config).unwrap();
 
+        // dbg!(&self.tree);
+        // dbg!(&self.full_config);
+        // dbg!(&self.data_path);
+
         assert!(self.tree.is_valid());
+
+        self.data_path.sanitize_path(&self.tree);
 
         Ok(())
     }
 
     pub fn write(&self) -> anyhow::Result<()> {
-        dbg!(&self.tree);
+        // dbg!(&self.tree);
 
         let data = Figment::new().merge(&self.tree);
 
@@ -249,8 +260,19 @@ impl Page {
 
         Ok(())
     }
+}
 
-    pub fn update(&mut self, message: PageMsg) {
+#[must_use]
+pub enum Action {
+    CreateDialog(Dialog),
+    RemoveDialog,
+    None,
+}
+
+impl Page {
+    pub fn update(&mut self, message: PageMsg, page_id: Entity) -> Action {
+        let mut action = Action::None;
+
         match message {
             PageMsg::SelectDataPath(pos) => {
                 self.data_path.change_to(pos);
@@ -289,14 +311,14 @@ impl Page {
                                 if let Ok(value) = node_number.value_string.parse() {
                                     node_number.value = Some(NumberValue::I128(value));
                                 } else {
-                                    return;
+                                    return Action::None;
                                 }
                             }
                             NumberKind::Float => {
                                 if let Ok(value) = node_number.value_string.parse() {
                                     node_number.value = Some(NumberValue::F64(value));
                                 } else {
-                                    return;
+                                    return Action::None;
                                 }
                             }
                         }
@@ -309,7 +331,103 @@ impl Page {
                         node_enum.nodes[value].modified = true;
                         self.tree.set_modified(data_path.iter());
                     }
+                    ChangeMsg::Remove(field) => {
+                        match &mut node.node {
+                            Node::Object(node_object) => {
+                                node_object.nodes.shift_remove(field.unwrap_name_ref());
+
+                                for n in node_object.nodes.values_mut() {
+                                    n.modified = true;
+                                }
+                            }
+                            Node::Array(node_array) => {
+                                node_array
+                                    .values
+                                    .as_mut()
+                                    .unwrap()
+                                    .remove(field.unwrap_indice());
+
+                                for n in node_array.values.as_mut().unwrap() {
+                                    n.modified = true;
+                                }
+                            }
+                            _ => panic!(),
+                        }
+                        // dbg!(&self.data_path);
+
+                        self.tree.set_modified(data_path.iter());
+                    }
+                    ChangeMsg::AddNewNodeToObject(name) => {
+                        let node_object = node.node.unwrap_object_mut();
+
+                        if node_object.nodes.contains_key(&name) {
+                            return Action::None;
+                        }
+
+                        let mut new_node = node_object.template().unwrap();
+
+                        if let Some(default) = &new_node.default {
+                            new_node.apply_value(default.clone(), false).unwrap();
+                        } else {
+                            new_node
+                                .apply_value(Value::Dict(Tag::Default, Dict::new()), false)
+                                .unwrap();
+                        }
+
+                        node_object.nodes.insert(name, new_node);
+
+                        for n in node_object.nodes.values_mut() {
+                            n.modified = true;
+                        }
+
+                        self.tree.set_modified(data_path.iter());
+
+                        action = Action::RemoveDialog;
+                    }
+                    ChangeMsg::AddNewNodeToArray => {
+                        let node_array = node.node.unwrap_array_mut();
+
+                        let mut new_node = node_array.template();
+
+                        if let Some(default) = &new_node.default {
+                            new_node.apply_value(default.clone(), false).unwrap();
+                        } else {
+                            new_node
+                                .apply_value(Value::Dict(Tag::Default, Dict::new()), false)
+                                .unwrap();
+                        }
+                        new_node.modified = true;
+
+                        match &mut node_array.values {
+                            Some(values) => {
+                                for n in &mut *values {
+                                    n.modified = true;
+                                }
+                                values.push(new_node);
+                            }
+                            None => {
+                                node_array.values = Some(vec![new_node]);
+                            }
+                        }
+                        self.tree.set_modified(data_path.iter());
+                    }
+
+                    ChangeMsg::RenameKey { prev, new } => {
+                        let node_object = node.node.unwrap_object_mut();
+
+                        if node_object.nodes.contains_key(&new) {
+                            return Action::None;
+                        }
+
+                        let node = node_object.nodes.get(&prev).unwrap().clone();
+                        node_object.nodes.insert(new, node);
+                        node_object.nodes.swap_remove(&prev);
+                        self.tree.set_modified(data_path.iter());
+                        action = Action::RemoveDialog;
+                    }
                 }
+
+                self.data_path.sanitize_path(&self.tree);
 
                 if self.tree.is_valid() {
                     self.write().unwrap();
@@ -318,6 +436,23 @@ impl Page {
             PageMsg::None => {
                 // pass
             }
-        }
+            PageMsg::DialogAddNewNodeToObject(data_path) => {
+                return Action::CreateDialog(Dialog::AddNewNodeToObject {
+                    name: String::new(),
+                    data_path,
+                    page_id,
+                });
+            }
+            PageMsg::DialogRenameKey(data_path, key) => {
+                return Action::CreateDialog(Dialog::RenameKey {
+                    previous: key,
+                    name: String::new(),
+                    data_path,
+                    page_id,
+                });
+            }
+        };
+
+        action
     }
 }

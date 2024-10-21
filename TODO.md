@@ -5,4 +5,4 @@ for libcosmic
 - add_maybe for Setting Section
 - on_press_with for button
 
-
+- reorder array

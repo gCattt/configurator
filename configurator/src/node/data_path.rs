@@ -72,6 +72,70 @@ impl DataPath {
             None => &[],
         }
     }
+
+    /// Keep the maximum of path, based on node that still exist
+    pub fn sanitize_path(&mut self, tree: &NodeContainer) {
+        dbg!(&self);
+
+        if let Some(pos) = sanitize_path_rec(self.vec.iter(), tree, 0) {
+            dbg!(&pos);
+            self.vec.truncate(pos);
+
+            if pos == 0 {
+                self.pos = None;
+            } else {
+                self.pos = self
+                    .pos
+                    .map(|current_pos| std::cmp::min(current_pos, pos - 1));
+            }
+        }
+        dbg!(&self);
+    }
+}
+
+/// Return Some(pos) where the first missing node is.
+/// None means the path is valid.
+fn sanitize_path_rec<'a>(
+    mut data_path: impl Iterator<Item = &'a DataPathType>,
+    node: &NodeContainer,
+    pos: usize,
+) -> Option<usize> {
+    match data_path.next() {
+        Some(component) => match &node.node {
+            Node::Object(node_object) => match component {
+                DataPathType::Name(name) => match node_object.nodes.get(name) {
+                    Some(inner_node) => sanitize_path_rec(data_path, inner_node, pos + 1),
+                    None => Some(pos),
+                },
+                DataPathType::Indice(_) => Some(pos),
+            },
+            Node::Enum(node_enum) => match component {
+                DataPathType::Name(_) => Some(pos),
+                DataPathType::Indice(indice_data_path) => match &node_enum.value {
+                    Some(indice_node) => {
+                        if indice_node == indice_data_path {
+                            sanitize_path_rec(data_path, &node_enum.nodes[*indice_node], pos + 1)
+                        } else {
+                            Some(pos)
+                        }
+                    }
+                    None => Some(pos),
+                },
+            },
+            Node::Array(node_array) => match component {
+                DataPathType::Name(_) => Some(pos),
+                DataPathType::Indice(indice_data_path) => match &node_array.values {
+                    Some(inner_nodes) => match inner_nodes.get(*indice_data_path) {
+                        Some(inner_node) => sanitize_path_rec(data_path, inner_node, pos + 1),
+                        None => Some(pos),
+                    },
+                    None => Some(pos),
+                },
+            },
+            _ => Some(pos),
+        },
+        None => None,
+    }
 }
 
 impl NodeContainer {
