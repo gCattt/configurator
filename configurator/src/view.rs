@@ -21,7 +21,7 @@ use crate::{
     node::{
         data_path::{DataPath, DataPathType},
         Node, NodeArray, NodeBool, NodeContainer, NodeEnum, NodeNumber, NodeObject, NodeString,
-        NodeValue, NumberKind,
+        NodeValue,
     },
     page::Page,
 };
@@ -324,8 +324,6 @@ fn view_enum<'a>(
     node: &'a NodeContainer,
     node_enum: &'a NodeEnum,
 ) -> Element<'a, PageMsg> {
-    let (value_pos, value) = node_enum.unwrap_value();
-
     column()
         .push_maybe(
             node.desc
@@ -536,10 +534,10 @@ fn view_number<'a>(
                     )
                     .push_maybe(if node_number.value.is_none() {
                         Some(no_value_defined_warning_icon())
-                    } else if match node_number.kind {
-                        NumberKind::Integer => node_number.value_string.parse::<i128>().is_err(),
-                        NumberKind::Float => node_number.value_string.parse::<f64>().is_err(),
-                    } {
+                    } else if node_number
+                        .try_parse_from_str(&node_number.value_string)
+                        .is_err()
+                    {
                         Some(
                             tooltip(
                                 icon!("report24"),
@@ -557,7 +555,7 @@ fn view_number<'a>(
             node.default
                 .as_ref()
                 .and_then(|v| v.to_num())
-                .and_then(|v| node_number.parse_number(v))
+                .and_then(|v| node_number.try_from_figment_num(v).ok())
                 .map(|default| {
                     section()
                         .title("Default")
@@ -586,8 +584,16 @@ fn view_value<'a>(
     node_value: &'a NodeValue,
 ) -> Element<'a, PageMsg> {
     column()
-        .push(text("i'm just a value"))
-        .push(text(format!("name: {:?}", data_path.last())))
-        .push(text(format!("{:?}", node_value.value)))
+        .push_maybe(
+            node.desc
+                .as_ref()
+                .map(|desc| section().title("Description").add(text(desc))),
+        )
+        .push(
+            section()
+                .title("Value")
+                .add(text(format!("{:?}", node_value.value))),
+        )
+        .spacing(SPACING)
         .into()
 }

@@ -34,6 +34,8 @@ ron.workspace = true
 xdg.workspace = true
 directories.workspace = true
 indexmap.workspace = true
+configurator_utils.workspace = true
+light_enum = "0.2"
 
 [dependencies.libcosmic]
 # git = "https://github.com/pop-os/libcosmic"

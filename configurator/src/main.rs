@@ -1,5 +1,5 @@
 // #![feature(btree_extract_if)]
-// #![feature(if_let_guard)]
+#![feature(if_let_guard)]
 #![feature(let_chains)]
 
 use app::App;
@@ -11,11 +11,11 @@ extern crate tracing;
 
 mod app;
 mod config;
-mod figment_serde_bridge;
 mod localize;
 mod message;
 mod node;
 mod page;
+mod providers;
 mod utils;
 mod view;
 #[macro_use]

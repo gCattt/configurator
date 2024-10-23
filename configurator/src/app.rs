@@ -14,7 +14,7 @@ use zconf2::ConfigManager;
 use crate::{
     config::Config,
     message::{AppMsg, ChangeMsg, PageMsg},
-    node::{data_path::DataPathType, NumberKind, NumberValue},
+    node::{data_path::DataPathType, NumberValue},
     page::{self, create_pages, Page},
     view::view_app,
 };
@@ -140,7 +140,9 @@ impl cosmic::Application for App {
             }
             AppMsg::ReloadActivePage => {
                 if let Some(page) = self.nav_model.active_data_mut::<Page>() {
-                    page.reload().unwrap();
+                    if let Err(err) = page.reload() {
+                        error!("{err}");
+                    }
                 }
             }
             AppMsg::ReloadLocalConfig => {

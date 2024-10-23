@@ -30,9 +30,23 @@ impl NodeContainer {
             (Value::String(tag, value), Node::String(node_string)) => {
                 node_string.value = Some(value);
             }
-            (Value::String(tag, value), Node::Enum(node_enum)) => {
-                let value = Value::String(tag, value);
+            (Value::Dict(tag, values), Node::Enum(node_enum)) => {
+                let pos = values
+                    .iter()
+                    .find_map(|(key, value)| {
+                        let key = Value::String(tag, key.clone());
+                        node_enum.nodes.iter().position(|e| e.is_matching(&key))
+                    })
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "can't find a compatible enum variant for dict {values:#?}. {node_enum:#?}"
+                        )
+                    })?;
 
+                node_enum.value = Some(pos);
+                node_enum.nodes[pos].apply_value(Value::Dict(tag, values), modified)?;
+            }
+            (value, Node::Enum(node_enum)) => {
                 let pos = node_enum
                     .nodes
                     .iter()
@@ -50,24 +64,12 @@ impl NodeContainer {
             (Value::Bool(tag, value), Node::Bool(node_bool)) => node_bool.value = Some(value),
             (Value::Num(tag, value), Node::Number(node_number)) => {
                 // dbg!(&value);
+                // dbg!(&node_number);
 
-                let value = node_number.parse_number(value).unwrap();
+                let value = node_number.try_from_figment_num(value)?;
 
                 node_number.value_string = value.to_string();
                 node_number.value = Some(value);
-            }
-            (Value::Empty(tag, value), Node::Enum(node_enum)) => {
-                let value = Value::Empty(tag, value);
-
-                let pos = node_enum
-                    .nodes
-                    .iter()
-                    .position(|e| e.is_matching(&value))
-                    .ok_or_else(|| {
-                        anyhow!("can't find a compatible enum variant for empty {value:#?}. {node_enum:#?}")
-                    })?;
-
-                node_enum.value = Some(pos);
             }
             (Value::Dict(tag, mut values), Node::Object(node_object)) => {
                 // hashmap are overided by existence of a value
@@ -91,22 +93,6 @@ impl NodeContainer {
                     }
                 }
             }
-            (Value::Dict(tag, values), Node::Enum(node_enum)) => {
-                let pos = values
-                    .iter()
-                    .find_map(|(key, value)| {
-                        let key = Value::String(tag, key.clone());
-                        node_enum.nodes.iter().position(|e| e.is_matching(&key))
-                    })
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "can't find a compatible enum variant for dict {values:#?}. {node_enum:#?}"
-                        )
-                    })?;
-
-                node_enum.value = Some(pos);
-                node_enum.nodes[pos].apply_value(Value::Dict(tag, values), modified)?;
-            }
             (Value::Array(tag, values), Node::Array(node_array)) => {
                 let mut nodes = Vec::new();
 
@@ -118,7 +104,7 @@ impl NodeContainer {
 
                 node_array.values = Some(nodes);
             }
-            (value, node) => bail!("no compatible node for array. value = {value:#?}. {node:#?}"),
+            (value, node) => bail!("no compatible node for value = {value:#?}. {node:#?}"),
         };
 
         Ok(())

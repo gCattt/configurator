@@ -7,27 +7,8 @@ use crate::node::Node;
 
 use super::{from_json_schema::json_value_to_figment_value, NodeContainer, NumberValue};
 
-impl Provider for NodeContainer {
-    fn metadata(&self) -> figment::Metadata {
-        Metadata::named("name")
-    }
-
-    fn data(
-        &self,
-    ) -> Result<figment::value::Map<figment::Profile, figment::value::Dict>, figment::Error> {
-        let mut map = figment::value::Map::new();
-
-        if let Some(value) = self.to_value(&Tag::Default) {
-            map.insert(Profile::default(), value.into_dict().unwrap());
-        }
-
-        Ok(map)
-    }
-}
-
-enum Error {}
 impl NodeContainer {
-    fn to_value(&self, tag: &Tag) -> Option<Value> {
+    pub fn to_value(&self, tag: &Tag) -> Option<Value> {
         if !self.modified {
             return None;
         }
@@ -39,10 +20,10 @@ impl NodeContainer {
                 .value
                 .as_ref()
                 .map(|value| Value::String(*tag, value.clone())),
-            Node::Number(node_number) => node_number.value.as_ref().map(|value| match value {
-                NumberValue::I128(value) => Value::Num(*tag, Num::I128(*value)),
-                NumberValue::F64(value) => Value::Num(*tag, Num::F64(*value)),
-            }),
+            Node::Number(node_number) => node_number
+                .value
+                .as_ref()
+                .map(|value| Value::Num(*tag, value.clone().into_num())),
             Node::Object(node_object) => {
                 let mut dict = Dict::new();
 
@@ -117,10 +98,6 @@ mod test {
 
         node.apply_figment(&default).unwrap();
 
-        let from_node = Figment::new().merge(&node);
-
         dbg!(&default.data().unwrap());
-
-        dbg!(&from_node.data().unwrap());
     }
 }

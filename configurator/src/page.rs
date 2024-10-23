@@ -12,57 +12,18 @@ use directories::BaseDirs;
 use figment::{
     providers::{self, Format},
     value::{Dict, Tag, Value},
-    Figment, Provider,
+    Figment, Profile, Provider,
 };
 
 use xdg::BaseDirectories;
 
 use crate::{
     app::Dialog,
-    figment_serde_bridge::FigmentSerdeBridge,
     message::{ChangeMsg, PageMsg},
-    node::{data_path::DataPath, Node, NodeContainer, NumberKind, NumberValue},
+    node::{data_path::DataPath, Node, NodeContainer, NumberValue},
 };
 
-struct BoxedProvider(Box<dyn Provider>);
-
-impl Provider for BoxedProvider {
-    fn metadata(&self) -> figment::Metadata {
-        self.0.metadata()
-    }
-
-    fn data(
-        &self,
-    ) -> Result<figment::value::Map<figment::Profile, figment::value::Dict>, figment::Error> {
-        self.0.data()
-    }
-}
-
-fn provider_for_format(path: &Path, format: &ConfigFormat) -> BoxedProvider {
-    let provider = match format {
-        ConfigFormat::Json => providers::Json::file(path),
-        ConfigFormat::CosmicRon => todo!(),
-    };
-
-    BoxedProvider(Box::new(provider))
-}
-
-#[derive(Debug)]
-pub enum ConfigFormat {
-    Json,
-    CosmicRon,
-}
-
-impl ConfigFormat {
-    pub fn try_new(format: &str) -> anyhow::Result<Self> {
-        let format = match format {
-            "json" => ConfigFormat::Json,
-            "cosmic_ron" => ConfigFormat::CosmicRon,
-            _ => bail!("unknown format: {}", format),
-        };
-        Ok(format)
-    }
-}
+use configurator_utils::ConfigFormat;
 
 #[derive(Debug)]
 pub struct Page {
@@ -165,12 +126,12 @@ impl Page {
             }
         };
 
-        let format = ConfigFormat::try_new(format)?;
+        let format = ConfigFormat::try_from(format)?;
 
         let mut system_config = Figment::new();
 
         for path in &source_paths {
-            system_config = system_config.merge(provider_for_format(path, &format))
+            system_config = system_config.merge(crate::providers::from_format(path, &format))
         }
 
         let tree = NodeContainer::from_json_schema(&json::from_value(json_value)?);
@@ -195,9 +156,11 @@ impl Page {
             format,
         };
 
-        page.reload().unwrap();
-
         // dbg!(&page.tree);
+
+        if let Err(err) = page.reload() {
+            error!("{err}");
+        }
 
         Ok(page)
     }
@@ -207,20 +170,19 @@ impl Page {
     }
 
     pub fn reload(&mut self) -> anyhow::Result<()> {
-        self.user_config =
-            Figment::new().merge(provider_for_format(&self.source_home_path, &self.format));
+        self.user_config = Figment::new().merge(crate::providers::from_format(
+            &self.source_home_path,
+            &self.format,
+        ));
 
         self.full_config = Figment::new()
             .merge(self.system_config.clone())
             .merge(self.user_config.clone());
 
-        self.tree.apply_figment(&self.full_config).unwrap();
-
         // dbg!(&self.tree);
         // dbg!(&self.full_config);
-        // dbg!(&self.data_path);
 
-        assert!(self.tree.is_valid());
+        self.tree.apply_figment(&self.full_config)?;
 
         self.data_path.sanitize_path(&self.tree);
 
@@ -228,34 +190,11 @@ impl Page {
     }
 
     pub fn write(&self) -> anyhow::Result<()> {
-        // dbg!(&self.tree);
-
-        let data = Figment::new().merge(&self.tree);
-
-        // dbg!(&data);
-
-        let serde_bridge = FigmentSerdeBridge::new(&data);
-
-        fn write_and_create_parent<P: AsRef<Path>, C: AsRef<[u8]>>(
-            path: P,
-            contents: C,
-        ) -> anyhow::Result<()> {
-            if !path.as_ref().exists() {
-                let parent = path.as_ref().parent().ok_or(anyhow!("no parent"))?;
-                fs::create_dir_all(parent)?;
+        match self.tree.to_value(&Tag::Default) {
+            Some(value) => {
+                crate::providers::write(&self.write_path, &self.format, &value)?;
             }
-
-            fs::write(path, contents)?;
-
-            Ok(())
-        }
-
-        match self.format {
-            ConfigFormat::Json => {
-                let content = json::to_string_pretty(&serde_bridge)?;
-                write_and_create_parent(&self.write_path, &content)?;
-            }
-            ConfigFormat::CosmicRon => todo!(),
+            None => bail!("no value to write"),
         }
 
         Ok(())
@@ -306,22 +245,15 @@ impl Page {
                         let node_number = node.node.unwrap_number_mut();
                         node_number.value_string = value;
 
-                        match node_number.kind {
-                            NumberKind::Integer => {
-                                if let Ok(value) = node_number.value_string.parse() {
-                                    node_number.value = Some(NumberValue::I128(value));
-                                } else {
-                                    return Action::None;
-                                }
+                        match node_number.try_parse_from_str(&node_number.value_string) {
+                            Ok(v) => {
+                                node_number.value = Some(v);
                             }
-                            NumberKind::Float => {
-                                if let Ok(value) = node_number.value_string.parse() {
-                                    node_number.value = Some(NumberValue::F64(value));
-                                } else {
-                                    return Action::None;
-                                }
+                            Err(_) => {
+                                return Action::None;
                             }
                         }
+
                         self.tree.set_modified(data_path.iter());
                     }
                     ChangeMsg::ChangeEnum(value) => {
