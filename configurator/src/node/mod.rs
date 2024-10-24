@@ -46,6 +46,17 @@ pub enum Node {
 }
 
 #[derive(Debug, Clone)]
+pub struct UnNamedObject {
+    pub values: Vec<NodeContainer>,
+}
+
+impl UnNamedObject {
+    pub fn new(values: Vec<NodeContainer>) -> Self {
+        Self { values }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct NodeBool {
     pub value: Option<bool>,
 }
