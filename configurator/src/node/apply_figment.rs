@@ -52,7 +52,9 @@ impl NodeContainer {
                     .iter()
                     .position(|e| e.is_matching(&value))
                     .ok_or_else(|| {
-                        anyhow!("can't find a compatible enum variant for string {value:#?}. {node_enum:#?}")
+                        anyhow!(
+                            "can't find a compatible enum variant for {value:#?}. {node_enum:#?}"
+                        )
                     })?;
 
                 node_enum.value = Some(pos);
@@ -96,14 +98,15 @@ impl NodeContainer {
             (Value::Array(tag, values), Node::Array(node_array)) => {
                 let mut nodes = Vec::new();
 
-                for value in values {
-                    let mut new_node = node_array.template();
+                for (pos, value) in values.into_iter().enumerate() {
+                    let mut new_node = node_array.template(Some(pos));
                     new_node.apply_value(value, modified)?;
                     nodes.push(new_node);
                 }
 
                 node_array.values = Some(nodes);
             }
+            (Value::Empty(tag, value), Node::Null) => {}
             (value, node) => bail!("no compatible node for value = {value:#?}. {node:#?}"),
         };
 
@@ -137,6 +140,7 @@ impl NodeContainer {
                 node_array.values.take();
             }
             Node::Value(node_value) => {}
+            Node::Any => todo!(),
         };
         self.modified = false;
     }
@@ -158,6 +162,10 @@ impl NodeContainer {
                     let v = values.get(key).unwrap();
                     n.is_matching(v)
                 })
+            }
+            (Value::Array(tag, values), Node::Array(node_array)) => {
+                // todo: more complicated logic
+                true
             }
             (value, Node::Value(node_value)) => {
                 json_value_eq_figment_value(&node_value.value, value)

@@ -34,9 +34,8 @@ impl<S> ConfigManager<S> {
         let settings_file_path = default_config_dir_path.join(format!("{}.json", application));
 
         let settings = if !settings_file_path.exists() {
-            let default_settings = S::default();
-            serialize(&settings_file_path, &default_settings)?;
-            default_settings
+            
+            S::default()
         } else {
             match deserialize(&settings_file_path) {
                 Ok(settings) => settings,

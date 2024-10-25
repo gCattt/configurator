@@ -29,6 +29,19 @@ pub struct NodeContainer {
     pub removable: bool,
 }
 
+impl NodeContainer {
+    pub fn from_node(node: Node) -> Self {
+        Self {
+            node,
+            default: None,
+            title: None,
+            desc: None,
+            modified: false,
+            removable: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Unwrap)]
 #[unwrap(ref_mut)]
 pub enum Node {
@@ -43,6 +56,7 @@ pub enum Node {
     /// represent a final value
     /// currently only string is supported
     Value(NodeValue),
+    Any,
 }
 
 #[derive(Debug, Clone)]
@@ -84,16 +98,24 @@ pub struct NodeEnum {
     pub nodes: Vec<NodeContainer>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NodeObject {
     pub nodes: IndexMap<String, NodeContainer>,
     pub template: Option<Box<NodeContainer>>,
 }
 
 #[derive(Debug, Clone)]
+pub enum NodeArrayTemplate {
+    All(Box<NodeContainer>),
+    FirstN(Vec<NodeContainer>),
+}
+
+#[derive(Debug, Clone)]
 pub struct NodeArray {
     pub values: Option<Vec<NodeContainer>>,
-    pub template: Box<NodeContainer>,
+    pub template: NodeArrayTemplate,
+    pub min: Option<u32>,
+    pub max: Option<u32>,
 }
 
 impl NodeBool {
@@ -141,17 +163,34 @@ impl NodeObject {
 }
 
 impl NodeArray {
-    pub fn new(node_type: NodeContainer) -> Self {
+    pub fn new_any() -> Self {
         Self {
-            template: Box::new(node_type),
             values: None,
+            template: NodeArrayTemplate::All(Box::new(NodeContainer::from_node(Node::Any))),
+            min: None,
+            max: None,
         }
     }
 
-    pub fn template(&self) -> NodeContainer {
-        let mut template = *self.template.clone();
-        template.removable = true;
-        template
+    pub fn template(&self, n: Option<usize>) -> NodeContainer {
+        match &self.template {
+            NodeArrayTemplate::All(new_node) => {
+                let mut new_node = (**new_node).clone();
+                new_node.removable = true;
+                new_node
+            }
+            NodeArrayTemplate::FirstN(vec) => {
+                let n = match n {
+                    Some(n) => n,
+                    None => match &self.values {
+                        Some(v) => v.len(),
+                        None => 0,
+                    },
+                };
+
+                vec[n].clone()
+            }
+        }
     }
 }
 
@@ -172,6 +211,7 @@ impl NodeContainer {
                 .as_ref()
                 .is_some_and(|values| values.iter().all(|n| n.is_valid())),
             Node::Value(node_value) => true,
+            Node::Any => true,
         }
     }
 
@@ -209,6 +249,7 @@ impl NodeContainer {
             Node::Enum(node_enum) => None,
             Node::Array(node_array) => None,
             Node::Value(node_value) => node_value.value.as_str().map(Cow::Borrowed),
+            Node::Any => Some(Cow::Borrowed("Any")),
         }
     }
 }

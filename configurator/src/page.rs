@@ -209,6 +209,7 @@ impl Page {
 
         if let Err(err) = page.reload() {
             error!("{err}");
+            panic!()
         }
 
         Ok(page)
@@ -368,14 +369,10 @@ impl Page {
                     ChangeMsg::AddNewNodeToArray => {
                         let node_array = node.node.unwrap_array_mut();
 
-                        let mut new_node = node_array.template();
+                        let mut new_node = node_array.template(None);
 
                         if let Some(default) = &new_node.default {
                             new_node.apply_value(default.clone(), false).unwrap();
-                        } else {
-                            new_node
-                                .apply_value(Value::Dict(Tag::Default, Dict::new()), false)
-                                .unwrap();
                         }
                         new_node.modified = true;
 
