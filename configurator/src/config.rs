@@ -17,10 +17,7 @@ impl Default for Config {
         Self {
             last_used_page: Default::default(),
             cosmic_compat: true,
-            masked: vec![
-                "io.github.wiiznokes.cosmic-ext-applet-clipboard-manager".into(),
-                APPID.into(),
-            ],
+            masked: vec![],
         }
     }
 }
@@ -36,7 +33,7 @@ mod test {
     #[test]
     #[ignore = "schema generation. Should be an executable"]
     pub fn gen_schema() {
-        let path = Path::new("../configurator/res").join(format!("{}.json", APPID));
+        let path = Path::new("../res/config_schema.json");
 
         let schema = configurator_schema::gen_schema::<Config>()
             .source_home_path(".config/configurator/configurator.json")

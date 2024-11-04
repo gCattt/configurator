@@ -38,6 +38,7 @@ configurator_utils.workspace = true
 light_enum = "0.2"
 include_dir = "0.7"
 bon.workspace = true
+constcat = "0.5"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic"
@@ -56,3 +57,4 @@ features = [
 
 [dev-dependencies]
 configurator_schema = { workspace = true }
+serial_test = "3"
