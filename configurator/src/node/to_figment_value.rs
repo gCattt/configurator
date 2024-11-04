@@ -8,6 +8,7 @@ use crate::node::Node;
 use super::{from_json_schema::json_value_to_figment_value, NodeContainer, NumberValue};
 
 impl NodeContainer {
+    // todo: return a result with info about the node missing a value
     pub fn to_value(&self, tag: &Tag) -> Option<Value> {
         if !self.modified {
             return None;
@@ -49,56 +50,5 @@ impl NodeContainer {
             Node::Value(node_value) => Some(json_value_to_figment_value(&node_value.value)),
             Node::Any => todo!(),
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-
-    use figment::{providers, Figment, Profile, Provider};
-    use schemars::{schema_for, JsonSchema};
-    use serde::Serialize;
-
-    use crate::node::NodeContainer;
-
-    #[derive(Debug, Serialize, JsonSchema)]
-    struct A {
-        e: E,
-        bool: bool,
-    }
-
-    #[derive(Debug, Serialize, JsonSchema)]
-    enum E {
-        F(B),
-    }
-
-    #[derive(Debug, Serialize, JsonSchema)]
-    struct B {
-        k: String,
-    }
-
-    impl Default for A {
-        fn default() -> Self {
-            Self {
-                e: E::F(B { k: "kaka".into() }),
-                bool: false,
-            }
-        }
-    }
-
-    #[test]
-    fn test() {
-        let schema = schema_for!(A);
-
-        let mut node = NodeContainer::from_json_schema(&schema);
-
-        dbg!(&node);
-
-        let default =
-            Figment::new().merge(providers::Serialized::from(A::default(), Profile::Default));
-
-        node.apply_figment(&default).unwrap();
-
-        dbg!(&default.data().unwrap());
     }
 }

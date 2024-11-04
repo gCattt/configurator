@@ -16,7 +16,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             last_used_page: Default::default(),
-            cosmic_compat: false,
+            cosmic_compat: true,
             masked: vec![
                 "io.github.wiiznokes.cosmic-ext-applet-clipboard-manager".into(),
                 APPID.into(),
@@ -34,6 +34,7 @@ mod test {
     use super::Config;
 
     #[test]
+    #[ignore = "schema generation. Should be an executable"]
     pub fn gen_schema() {
         let path = Path::new("../configurator/res").join(format!("{}.json", APPID));
 
