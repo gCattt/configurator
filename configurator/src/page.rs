@@ -70,7 +70,7 @@ pub fn create_pages(config: &Config) -> impl Iterator<Item = Page> + use<'_> {
                 let appid = appid_from_schema_path(file.path());
 
                 if !config.masked.contains(&appid) {
-                    Some(Page::from_str(appid, content).unwrap())
+                    Some(Page::from_str(&appid, content).unwrap())
                 } else {
                     None
                 }
@@ -106,7 +106,7 @@ pub fn create_pages(config: &Config) -> impl Iterator<Item = Page> + use<'_> {
 
             if !config.masked.contains(&appid) {
                 match fs::read_to_string(&schema_path) {
-                    Ok(content) => match Page::from_str(appid, &content) {
+                    Ok(content) => match Page::from_str(&appid, &content) {
                         Ok(page) => Some(page),
                         Err(e) => {
                             error!("{}", e);
@@ -133,7 +133,9 @@ fn appid_from_schema_path(schema_path: &Path) -> String {
 }
 
 impl Page {
-    fn from_str(appid: String, content: &str) -> anyhow::Result<Self> {
+    // need &str for appid: https://github.com/tokio-rs/tracing/issues/1181
+    #[instrument(skip(content))]
+    fn from_str(appid: &str, content: &str) -> anyhow::Result<Self> {
         let json_value = json::Value::from_str(content)?;
 
         let Some(json_obj) = json_value.as_object() else {
@@ -187,14 +189,14 @@ impl Page {
             system_config = system_config.merge(crate::providers::read_from_format(path, &format))
         }
 
-        info!("start generating node from schema {}", appid);
+        info!("start generating node from schema");
         let tree = NodeContainer::from_json_schema(&json::from_value(json_value)?);
 
         let title = appid.split('.').last().unwrap().to_string();
 
         let mut page = Self {
             title,
-            appid,
+            appid: appid.to_string(),
             system_config,
             user_config: Figment::new(),
             full_config: Figment::new(),
@@ -206,11 +208,8 @@ impl Page {
             format,
         };
 
-        // dbg!(&page.tree);
-
         if let Err(err) = page.reload() {
             error!("{err}");
-            // panic!()
         }
 
         Ok(page)
@@ -220,18 +219,25 @@ impl Page {
         self.title.clone()
     }
 
+    #[instrument(skip_all)]
     pub fn reload(&mut self) -> anyhow::Result<()> {
+        info!("reload the config");
+
         self.user_config = Figment::new().merge(crate::providers::read_from_format(
             &self.source_home_path,
             &self.format,
         ));
 
+        debug!("user_config = {:#?}", self.user_config);
+
+        debug!("system_config = {:#?}", self.system_config);
+
         self.full_config = Figment::new()
             .merge(self.system_config.clone())
             .merge(self.user_config.clone());
 
-        // dbg!(&self.tree);
-        // dbg!(&self.full_config);
+        // debug!("tree = {:#?}", self.tree);
+        debug!("full_config = {:#?}", self.full_config);
 
         self.tree.remove_value_rec();
 
